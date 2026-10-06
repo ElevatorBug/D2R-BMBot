@@ -285,6 +285,7 @@ public partial class Form1 : Form
     public Form1()
     {
         InitializeComponent();
+        AppTheme.Apply(this);
         Form1_0 = this;
         (Form1_0.ScreenX, Form1_0.ScreenY) = GetWindowResolutionByExe("d2r.exe");
         this.TopMost = true;
@@ -734,33 +735,6 @@ public partial class Form1 : Form
                 File.Delete(FileList[i]);
             }
         }
-    }
-
-    public void method_1(string string_3, Color ThisColor, bool LogTime = true)
-    {
-        //try
-        //{
-        if (richTextBox1.InvokeRequired)
-        {
-            // Call this same method but append THREAD2 to the text
-            Action safeWrite = delegate { method_1(string_3, ThisColor); };
-            richTextBox1.Invoke(safeWrite);
-        }
-        else
-        {
-            if (LogTime) string_3 = string_3 + " " + GameStruc_0.GetTimeNow();
-            Console.WriteLine(string_3);
-            if (ThisColor == Color.OrangeRed && !CharConfig.LogNotUsefulErrors) return;
-            richTextBox1.SelectionColor = ThisColor;
-            richTextBox1.AppendText(string_3 + Environment.NewLine);
-            overlayForm.AddLogs(string_3, ThisColor);
-
-            if (ThisColor == Color.Red || ThisColor == Color.Orange || ThisColor == Color.DarkOrange || ThisColor == Color.OrangeRed) AppendTextErrorLogs(string_3, ThisColor);
-            if (ThisColor == Color.DarkBlue) AppendTextGameLogs(string_3, ThisColor);
-            Application.DoEvents();
-        }
-        //}
-        //catch { }
     }
 
     public void method_1_Items(string string_3, Color ThisColor)

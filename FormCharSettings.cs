@@ -19,6 +19,7 @@ public partial class FormCharSettings : Form
     {
         Form1_0 = form1_1;
         InitializeComponent();
+        AppTheme.Apply(this);
         this.TopMost = true;
 
         panelHelpKeys.Location = new Point(4, 248);

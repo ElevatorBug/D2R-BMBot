@@ -295,6 +295,10 @@
     <Compile Include="Config\ScriptsLoader - Copier.cs" />
     <Compile Include="Config\ScriptsLoader.cs" />
     <Compile Include="Config\SettingsLoader.cs" />
+    <Compile Include="UI\AppTheme.cs" />
+    <Compile Include="Form1.Logging.cs">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </Compile>
     <Compile Include="FormAdvancedSettings.cs">
       <SubType>Form</SubType>
     </Compile>

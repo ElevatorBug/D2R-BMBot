@@ -17,6 +17,7 @@ public partial class FormAdvancedSettings : Form
         Form1_0 = form1_1;
 
         InitializeComponent();
+        AppTheme.Apply(this);
         this.TopMost = true;
 
         LoadSettings();

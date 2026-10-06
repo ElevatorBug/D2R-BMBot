@@ -14,6 +14,7 @@ public partial class FormSettings : Form
 
         //this.Location = new Point(Form1_0.Location.X + Form1_0.Width, Form1_0.Location.Y);
         InitializeComponent();
+        AppTheme.Apply(this);
         this.TopMost = true;
 
         textBoxStartKey.Items.Clear();

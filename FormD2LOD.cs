@@ -19,6 +19,7 @@ public partial class FormD2LOD : Form
         Form1_0 = form1_1;
 
         InitializeComponent();
+        AppTheme.Apply(this);
         this.TopMost = true;
     }
 
