@@ -1,356 +1,194 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Diagnostics;
+using System.Text;
 
+/// <summary>Compatibility facade for existing decoders, independent of the UI.</summary>
 public class Mem
 {
-    Form1 Form1_0;
+    private readonly IProcessMemoryReader reader;
+    private readonly Func<IntPtr> processHandle;
+    private readonly Func<IntPtr> baseAddress;
 
-    [DllImport("kernel32.dll")]
-    public static extern bool ReadProcessMemory(int hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, ref int lpNumberOfBytesRead);
+    public event Action<MemoryReadFailure> ReadFailed;
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool WriteProcessMemory(int hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int nSize, ref int lpNumberOfBytesWritten);
-
-    public void SetForm1(Form1 Form1_1)
+    public Mem(IProcessMemoryReader reader, Func<IntPtr> processHandle, Func<IntPtr> baseAddress)
     {
-        Form1_0 = Form1_1;
+        this.reader = reader ?? throw new ArgumentNullException(nameof(reader));
+        this.processHandle = processHandle ?? throw new ArgumentNullException(nameof(processHandle));
+        this.baseAddress = baseAddress ?? throw new ArgumentNullException(nameof(baseAddress));
     }
 
-    Dictionary<string, int> aTypeSize = new Dictionary<string, int>
-        {
-            {"UChar", 1}, {"Char", 1},
-            {"UShort", 2}, {"Short", 2},
-            {"UInt", 4}, {"Int", 4},
-            {"UFloat", 4}, {"Float", 4},
-            {"Int64", 8}, {"Double", 8}
-        };
+    // Retained for legacy compatibility; the application opens the process for reading.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WriteProcessMemory(IntPtr handle, IntPtr address,
+        byte[] buffer, UIntPtr count, out UIntPtr bytesWritten);
 
     public void WriteRawMemory(IntPtr address, byte[] buffer, int writesize)
     {
-        int pBytesWrite = 0;
-        WriteProcessMemory((int)Form1_0.processHandle, address, buffer, writesize, ref pBytesWrite);
+        ValidateBuffer(buffer, writesize);
+        UIntPtr written;
+        WriteProcessMemory(processHandle(), address, buffer, new UIntPtr((uint)writesize), out written);
+    }
+
+    private static void ValidateBuffer(byte[] buffer, int count)
+    {
+        if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+        if (count < 0 || count > buffer.Length) throw new ArgumentOutOfRangeException(nameof(count));
+    }
+
+    private bool ReadBuffer(IntPtr address, byte[] buffer, int count, out int bytesRead)
+    {
+        ValidateBuffer(buffer, count);
+        bytesRead = 0;
+        if (count == 0) return true;
+
+        int errorCode;
+        bool success = reader.TryRead(processHandle(), address, buffer, count, out bytesRead, out errorCode);
+        // Bulk scans retain a valid prefix, but never reuse an unread suffix.
+        if (bytesRead < 0 || bytesRead > count)
+        {
+            bytesRead = 0;
+            success = false;
+        }
+        Array.Clear(buffer, bytesRead, count - bytesRead);
+        if (!success || bytesRead != count)
+            ReadFailed?.Invoke(new MemoryReadFailure(address, count, bytesRead, errorCode));
+        return success && bytesRead == count;
+    }
+
+    private bool TryReadExact(IntPtr address, int count, out byte[] buffer)
+    {
+        if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+        buffer = new byte[count];
+        int bytesRead;
+        if (ReadBuffer(address, buffer, count, out bytesRead)) return true;
+        Array.Clear(buffer, 0, buffer.Length);
+        return false;
     }
 
     public void ReadMemory(IntPtr address, ref byte[] buffer, int bytes, ref int pBytesRead)
     {
-        ReadProcessMemory((int)Form1_0.processHandle, address, buffer, bytes, ref pBytesRead);
+        ReadBuffer(address, buffer, bytes, out pBytesRead);
     }
 
     public void ReadRawMemory(long address, ref byte[] buffer, int bytes = 4, params int[] aOffsets)
     {
-        buffer = new byte[bytes];
-        int pBytesRead = 0;
-        /*if (aOffsets.Length > 0)
-        {
-            address = this.GetAddressFromOffsets(address, aOffsets);
-        }*/
-
-        try
-        {
-            ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)address, buffer, bytes, ref pBytesRead);
-        }
-        catch
-        {
-            Form1_0.method_1("Couldn't read D2R process memory!", Color.Red);
-        }
+        // aOffsets remains unused, as in the original API; callers supply absolute addresses.
+        TryReadExact(new IntPtr(address), bytes, out buffer);
     }
 
-    public string ReadMemString(long TPoint)
+    public string ReadMemString(long address)
     {
-        string name = "";
-        for (int i2 = 0; i2 < 16; i2++)
+        var name = new StringBuilder(16);
+        for (int i = 0; i < 16; i++)
         {
-            if (ReadByteRaw((IntPtr)(TPoint + i2)) != 0x00)
-            {
-                name += ReadUCharRaw((IntPtr)(TPoint + i2));
-            }
-            else
-            {
-                break;
-            }
+            byte value = ReadByteRaw(new IntPtr(address + i));
+            if (value == 0) break;
+            name.Append((char)value);
         }
-        return name;
+        return name.ToString();
     }
 
-    public int ReadInt(IntPtr ThisAd)
+    private IntPtr RelativeAddress(IntPtr offset)
     {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-        ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return BitConverter.ToInt32(Form1_0.bufferRead, 0);
-        }
-        return 0;
+        return new IntPtr(baseAddress().ToInt64() + offset.ToInt64());
     }
 
-    public UInt16 ReadUInt16(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Short"]];
-        ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["Short"], ref bytesRead);
+    public int ReadInt(IntPtr offset) => ReadInt32Raw(RelativeAddress(offset));
+    public ushort ReadUInt16(IntPtr offset) => ReadUInt16Raw(RelativeAddress(offset));
+    public uint ReadUInt32(IntPtr offset) => ReadUInt32Raw(RelativeAddress(offset));
+    public int ReadInt32(IntPtr offset) => ReadInt32Raw(RelativeAddress(offset));
+    public long ReadInt64(IntPtr offset) => ReadInt64Raw(RelativeAddress(offset));
+    public char ReadUChar(IntPtr offset) => ReadUCharRaw(RelativeAddress(offset));
+    public int ReadIntRaw(IntPtr address) => ReadInt32Raw(address);
+    public char ReadUCharRaw(IntPtr address) => (char)ReadByteRaw(address);
 
-        if (bytesRead > 0)
-        {
-            return BitConverter.ToUInt16(Form1_0.bufferRead, 0);
-        }
-        return 0;
+    public byte ReadByteRaw(IntPtr address)
+    {
+        byte[] buffer;
+        return TryReadExact(address, 1, out buffer) ? buffer[0] : (byte)0;
     }
 
-    public UInt32 ReadUInt32(IntPtr ThisAd)
+    public ushort ReadUInt16Raw(IntPtr address)
     {
-        try
-        {
-            int bytesRead = 0;
-            Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-            ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-            if (bytesRead > 0)
-            {
-                return BitConverter.ToUInt32(Form1_0.bufferRead, 0);
-            }
-        }
-        catch { }
-        return 0;
+        byte[] buffer;
+        return TryReadExact(address, 2, out buffer) ? BitConverter.ToUInt16(buffer, 0) : (ushort)0;
     }
 
-    public Int32 ReadInt32(IntPtr ThisAd)
+    public uint ReadUInt32Raw(IntPtr address)
     {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-        ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return BitConverter.ToInt32(Form1_0.bufferRead, 0);
-        }
-        return 0;
+        byte[] buffer;
+        return TryReadExact(address, 4, out buffer) ? BitConverter.ToUInt32(buffer, 0) : 0;
     }
 
-    public Int64 ReadInt64(IntPtr ThisAd)
+    public int ReadInt32Raw(IntPtr address)
     {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int64"]];
-        ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["Int64"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return BitConverter.ToInt64(Form1_0.bufferRead, 0);
-        }
-        return 0;
+        byte[] buffer;
+        return TryReadExact(address, 4, out buffer) ? BitConverter.ToInt32(buffer, 0) : 0;
     }
 
-    public unsafe UInt64 ReadUInt64(UIntPtr address)
-
+    public long ReadInt64Raw(IntPtr address)
     {
-        int bytesRead = 0;
-        byte[] buffer = new byte[8];
-        IntPtr baseAddress = (IntPtr)address.ToPointer();
-        ReadProcessMemory((int)Form1_0.processHandle, baseAddress, buffer, buffer.Length, ref bytesRead);
+        byte[] buffer;
+        return TryReadExact(address, 8, out buffer) ? BitConverter.ToInt64(buffer, 0) : 0;
+    }
 
-        if (bytesRead > 0)
-        {
-            return BitConverter.ToUInt64(buffer, 0);
-        }
-        return 0;
+    private static IntPtr ToIntPtr(UIntPtr address)
+    {
+        return new IntPtr(unchecked((long)address.ToUInt64()));
+    }
+
+    public ulong ReadUInt64(UIntPtr address)
+    {
+        byte[] buffer;
+        return TryReadExact(ToIntPtr(address), 8, out buffer) ? BitConverter.ToUInt64(buffer, 0) : 0;
     }
 
     public uint ReadUIntFromBuffer(byte[] bytes, uint offset, int size)
     {
-        if (bytes == null)
-        {
-            throw new ArgumentNullException(nameof(bytes));
-        }
+        if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+        if (size < 1 || size > 4) throw new ArgumentOutOfRangeException(nameof(size));
+        if ((ulong)offset + (uint)size > (ulong)bytes.Length)
+            throw new ArgumentOutOfRangeException(nameof(offset));
 
-        if (offset + size > bytes.Length)
-        {
-            throw new ArgumentOutOfRangeException(nameof(offset), "Offset and size exceed the length of the byte array.");
-        }
-
-        return BytesToUint(bytes, offset, size);
-    }
-
-    private static uint BytesToUint(byte[] bytes, uint offset, int size)
-    {
         uint result = 0;
-
         for (int i = 0; i < size; i++)
-        {
-            result |= (uint)bytes[offset + i] << (8 * i);
-        }
-
+            result |= (uint)bytes[(int)offset + i] << (8 * i);
         return result;
-    }
-    public char ReadUChar(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["UChar"]];
-        ReadProcessMemory((int)Form1_0.processHandle, (IntPtr)((long)Form1_0.BaseAddress + (long)ThisAd), Form1_0.bufferRead, aTypeSize["UChar"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return (char)Form1_0.bufferRead[0];
-        }
-        return '\0';
-    }
-
-    //###################################################################################################
-
-    public byte ReadByteRaw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[1];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, 1, ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return Form1_0.bufferRead[0];
-        }
-        return 0;
-    }
-
-    public int ReadIntRaw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            try
-            {
-                return BitConverter.ToInt32(Form1_0.bufferRead, 0);
-            }
-            catch { }
-        }
-        return 0;
-    }
-
-    public UInt16 ReadUInt16Raw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Short"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["Short"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            try
-            {
-                return BitConverter.ToUInt16(Form1_0.bufferRead, 0);
-            }
-            catch { }
-        }
-        return 0;
-    }
-
-    public UInt32 ReadUInt32Raw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            try
-            {
-                return BitConverter.ToUInt32(Form1_0.bufferRead, 0);
-            }
-            catch { }
-        }
-        return 0;
-    }
-
-    public Int32 ReadInt32Raw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["Int"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            try
-            {
-                return BitConverter.ToInt32(Form1_0.bufferRead, 0);
-            }
-            catch { }
-        }
-        return 0;
-    }
-
-    public Int64 ReadInt64Raw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["Int64"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["Int64"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            try
-            {
-                return BitConverter.ToInt64(Form1_0.bufferRead, 0);
-            }
-            catch { }
-        }
-        return 0;
-    }
-
-    public char ReadUCharRaw(IntPtr ThisAd)
-    {
-        int bytesRead = 0;
-        Form1_0.bufferRead = new byte[aTypeSize["UChar"]];
-        ReadProcessMemory((int)Form1_0.processHandle, ThisAd, Form1_0.bufferRead, aTypeSize["UChar"], ref bytesRead);
-
-        if (bytesRead > 0)
-        {
-            return (char)Form1_0.bufferRead[0];
-        }
-        return '\0';
     }
 
     public byte[] ReadBytesFromMemory(IntPtr address, int size)
     {
-        byte[] buffer = new byte[size];
-        int bytesRead = 0;
-        ReadProcessMemory((int)Form1_0.processHandle, address, buffer, size, ref bytesRead);
+        byte[] buffer;
+        TryReadExact(address, size, out buffer);
         return buffer;
     }
 
-    public unsafe byte[] ReadBytesFromMemory(UIntPtr address, uint size)
+    public byte[] ReadBytesFromMemory(UIntPtr address, uint size)
     {
-        byte[] buffer = new byte[size];
-        int bytesRead = 0;
-        IntPtr baseAddress = (IntPtr)address.ToPointer();
-
-        ReadProcessMemory((int)Form1_0.processHandle, baseAddress, buffer, (int)size, ref bytesRead);
-        return buffer;
+        return ReadBytesFromMemory(ToIntPtr(address), checked((int)size));
     }
-
 
     public Dictionary<Enums.Attribute, int> GetMonsterStats(uint statCount, UIntPtr statPtr)
     {
-        Dictionary<Enums.Attribute, int> stats = new Dictionary<Enums.Attribute, int>();
+        var stats = new Dictionary<Enums.Attribute, int>();
+        if (statCount == 0) return stats;
 
-        if (statCount > 0)
+        int size = checked((int)((ulong)statCount * 8));
+        byte[] buffer;
+        IntPtr address = ToIntPtr(UIntPtr.Add(statPtr, 2));
+        if (!TryReadExact(address, size, out buffer)) return stats;
+
+        for (int i = 0; i < (int)statCount; i++)
         {
-            byte[] statBuffer = ReadBytesFromMemory(statPtr + 0x2, (statCount * 8));
-
-            for (int i = 0; i < statCount; i++)
-            {
-                uint offset = (uint)(i * 8);
-                ushort statEnum = (ushort)ReadUIntFromBuffer(statBuffer, offset, 2); // Uint16 in Go
-                uint statValue = ReadUIntFromBuffer(statBuffer, offset + 0x2, 4); // Uint32 in Go
-
-                if (Enum.IsDefined(typeof(Enums.Attribute), (int)statEnum))
-                {
-                    stats[(Enums.Attribute)(int)statEnum] = (int)statValue;
-                }
-            }
+            uint offset = (uint)(i * 8);
+            ushort statEnum = (ushort)ReadUIntFromBuffer(buffer, offset, 2);
+            uint statValue = ReadUIntFromBuffer(buffer, offset + 2, 4);
+            if (Enum.IsDefined(typeof(Enums.Attribute), (int)statEnum))
+                stats[(Enums.Attribute)statEnum] = unchecked((int)statValue);
         }
-
         return stats;
     }
 }

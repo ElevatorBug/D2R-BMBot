@@ -26,6 +26,10 @@ public class PlayerScan
 {
     Form1 Form1_0;
 
+    private PlayerStateSnapshot latestState;
+    public PlayerStateSnapshot LatestState => Volatile.Read(ref latestState);
+    public event Action<PlayerStateSnapshot> StateUpdated;
+
     public long PlayerPointer = 0;
     public long PlayerNamePointer = 0;
     public long actAddress = 0;
@@ -351,10 +355,10 @@ public class PlayerScan
 
         SetMaxHPAndMana();
 
-        Form1_0.Grid_SetInfos("Cords", xPosFinal + "," + yPosFinal);
-        Form1_0.Grid_SetInfos("Life", PlayerHP + "/" + PlayerMaxHP);
-        Form1_0.Grid_SetInfos("Mana", PlayerMana + "/" + PlayerMaxMana);
-        Form1_0.Grid_SetInfos("Map Level", levelNo.ToString() + " " + (Enums.Area)levelNo);
+        var state = new PlayerStateSnapshot(pName, xPosFinal, yPosFinal,
+            PlayerHP, PlayerMaxHP, PlayerMana, PlayerMaxMana, levelNo, difficulty, mapSeedValue);
+        Interlocked.Exchange(ref latestState, state);
+        StateUpdated?.Invoke(state);
         //Form1_0.Grid_SetInfos("Room Exit", RoomExit[0].ToString() + ", " + RoomExit[1].ToString());
         //Form1_0.Grid_SetInfos("Seed", mapSeed.ToString());
         //Form1_0.Grid_SetInfos("Difficulty", difficulty.ToString());
