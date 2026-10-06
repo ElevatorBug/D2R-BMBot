@@ -220,9 +220,6 @@
       <HintPath>packages\System.Text.Encoding.CodePages.8.0.0\lib\net462\System.Text.Encoding.CodePages.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="System.Text.Json, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <Private>True</Private>
-    </Reference>
     <Reference Include="System.Text.RegularExpressions, Version=4.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>packages\System.Text.RegularExpressions.4.3.0\lib\net463\System.Text.RegularExpressions.dll</HintPath>
       <Private>True</Private>
@@ -296,6 +293,15 @@
     <Compile Include="Config\ScriptsLoader.cs" />
     <Compile Include="Config\SettingsLoader.cs" />
     <Compile Include="UI\AppTheme.cs" />
+    <Compile Include="Core\ProcessMemoryReader.cs" />
+    <Compile Include="Core\PlayerStateSnapshot.cs" />
+    <Compile Include="Core\RunSequence.cs" />
+    <Compile Include="Form1.Presentation.cs">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Form1.RunSequence.cs">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </Compile>
     <Compile Include="Form1.Logging.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
